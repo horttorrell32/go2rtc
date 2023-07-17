@@ -3,6 +3,7 @@ package ffmpeg
 import (
 	"testing"
 
+	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,6 +41,31 @@ func TestParseArgsDevice(t *testing.T) {
 	// [DEVICE] video will be transcoded to H265 with framerate 20, audio will be skipped
 	args = parseArgs("device?video=0&video_size=1280x720&framerate=20#video=h265#audio=pcma")
 	require.Equal(t, `ffmpeg -hide_banner -f dshow -video_size 1280x720 -framerate 20 -i video="0" -c:v libx265 -g 50 -profile:v main -level:v 5.1 -preset:v superfast -tune:v zerolatency -c:a pcm_alaw -ar:a 8000 -ac:a 1 -user_agent ffmpeg/go2rtc -rtsp_transport tcp -f rtsp {output}`, args.String())
+}
+
+func TestParseArgsStream(t *testing.T) {
+	// Init 'cam1_example' stream
+	streams.New("cam1_example", "does_not_matter")
+
+	// [STREAM] video video will be transcoded to H264, audio will be skipped
+	args := parseArgs("cam1_example#video=h264")
+	require.Equal(t, `ffmpeg -hide_banner -fflags nobuffer -flags low_delay -timeout 5000000 -user_agent go2rtc/ffmpeg -rtsp_flags prefer_tcp -i rtsp://127.0.0.1:/cam1_example?video -c:v libx264 -g 50 -profile:v high -level:v 4.1 -preset:v superfast -tune:v zerolatency -pix_fmt:v yuvj420p -an -user_agent ffmpeg/go2rtc -rtsp_transport tcp -f rtsp {output}`, args.String())
+
+	// [STREAM] video will be copied, audio will be transcoded to pcmu
+	args = parseArgs("cam1_example#video=copy#audio=pcmu")
+	require.Equal(t, `ffmpeg -hide_banner -fflags nobuffer -flags low_delay -timeout 5000000 -user_agent go2rtc/ffmpeg -rtsp_flags prefer_tcp -i rtsp://127.0.0.1:/cam1_example?video&audio -c:v copy -c:a pcm_mulaw -ar:a 8000 -ac:a 1 -user_agent ffmpeg/go2rtc -rtsp_transport tcp -f rtsp {output}`, args.String())
+
+	// [STREAM] video will be copied, audio will be transcoded to pcma
+	args = parseArgs("cam1_example#audio=pcma")
+	require.Equal(t, `ffmpeg -hide_banner -fflags nobuffer -flags low_delay -timeout 5000000 -user_agent go2rtc/ffmpeg -rtsp_flags prefer_tcp -i rtsp://127.0.0.1:/cam1_example?audio -c:a pcm_alaw -ar:a 8000 -ac:a 1 -vn -user_agent ffmpeg/go2rtc -rtsp_transport tcp -f rtsp {output}`, args.String())
+
+	// [STREAM] video will be transcoded to H265 and rotate 90º, audio will be skipped
+	args = parseArgs("cam1_example#video=h265#rotate=90")
+	require.Equal(t, `ffmpeg -hide_banner -fflags nobuffer -flags low_delay -timeout 5000000 -user_agent go2rtc/ffmpeg -rtsp_flags prefer_tcp -i rtsp://127.0.0.1:/cam1_example?video -c:v libx265 -g 50 -profile:v main -level:v 5.1 -preset:v superfast -tune:v zerolatency -an -vf "transpose=1" -user_agent ffmpeg/go2rtc -rtsp_transport tcp -f rtsp {output}`, args.String())
+
+	// [STREAM] video will be output for MJPEG to pipe, audio will be skipped
+	args = parseArgs("cam1_example#video=mjpeg")
+	require.Equal(t, `ffmpeg -hide_banner -fflags nobuffer -flags low_delay -timeout 5000000 -user_agent go2rtc/ffmpeg -rtsp_flags prefer_tcp -i rtsp://127.0.0.1:/cam1_example?video -c:v mjpeg -an -f mjpeg -`, args.String())
 }
 
 func TestParseArgsIpCam(t *testing.T) {
