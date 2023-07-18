@@ -36,7 +36,7 @@ func Get(name string) *Stream {
 	return streams[name]
 }
 
-var sanitize = regexp.MustCompile(`\S`)
+var sanitize = regexp.MustCompile(`\s`)
 
 func New(name string, source string) *Stream {
 	// not allow creating dynamic streams with spaces in the source
