@@ -3,15 +3,16 @@ package mjpeg
 import (
 	"bufio"
 	"errors"
-	"github.com/AlexxIT/go2rtc/pkg/core"
-	"github.com/AlexxIT/go2rtc/pkg/tcp"
-	"github.com/pion/rtp"
 	"io"
 	"net/http"
 	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/AlexxIT/go2rtc/pkg/core"
+	"github.com/AlexxIT/go2rtc/pkg/tcp"
+	"github.com/pion/rtp"
 )
 
 type Client struct {
@@ -87,6 +88,13 @@ func (c *Client) startMJPEG(boundary string) error {
 		if err != nil {
 			return err
 		}
+
+		// fix leading empty line from esp32-cam-webserver
+		// https://github.com/AlexxIT/go2rtc/issues/545
+		if s == "" {
+			continue
+		}
+
 		if !strings.HasPrefix(s, boundary) {
 			return errors.New("wrong boundary: " + s)
 		}
@@ -112,7 +120,10 @@ func (c *Client) startMJPEG(boundary string) error {
 		}
 
 		if c.receiver != nil {
-			packet := &rtp.Packet{Header: rtp.Header{Timestamp: now()}, Payload: buf}
+			packet := &rtp.Packet{
+				Header:  rtp.Header{Timestamp: core.Now90000()},
+				Payload: buf,
+			}
 			c.receiver.WriteRTP(packet)
 		}
 
