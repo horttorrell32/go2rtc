@@ -23,8 +23,10 @@ type Conn struct {
 	// public
 
 	Backchannel bool
+	Media       string
 	PacketSize  uint16
 	SessionName string
+	Timeout     int
 	Transport   string // custom transport support, ex. RTSP over WebSocket
 
 	Medias    []*core.Media
@@ -37,6 +39,7 @@ type Conn struct {
 	conn      net.Conn
 	keepalive int
 	mode      core.Mode
+	playOK    bool
 	reader    *bufio.Reader
 	sequence  int
 	session   string
@@ -106,13 +109,17 @@ func (c *Conn) Handle() (err error) {
 		}
 		keepaliveTS = time.Now().Add(keepaliveDT)
 
-		// polling frames from remote RTSP Server (ex Camera)
-		if len(c.receivers) > 0 {
-			// if we receiving video/audio from camera
+		if c.Timeout == 0 {
+			// polling frames from remote RTSP Server (ex Camera)
 			timeout = time.Second * 5
+
+			if len(c.receivers) == 0 {
+				// if we only send audio to camera
+				// https://github.com/AlexxIT/go2rtc/issues/659
+				timeout += keepaliveDT
+			}
 		} else {
-			// if we only send audio to camera
-			timeout = time.Second * 30
+			timeout = time.Second * time.Duration(c.Timeout)
 		}
 
 	case core.ModePassiveProducer:
@@ -155,6 +162,8 @@ func (c *Conn) Handle() (err error) {
 					return
 				}
 				c.Fire(res)
+				// for playing backchannel only after OK response on play
+				c.playOK = true
 				continue
 
 			case "OPTI", "TEAR", "DESC", "SETU", "PLAY", "PAUS", "RECO", "ANNO", "GET_", "SET_":
@@ -163,6 +172,12 @@ func (c *Conn) Handle() (err error) {
 					return
 				}
 				c.Fire(req)
+				if req.Method == MethodOptions {
+					res := &tcp.Response{Request: req}
+					if err = c.WriteResponse(res); err != nil {
+						return
+					}
+				}
 				continue
 
 			default:

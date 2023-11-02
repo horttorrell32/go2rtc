@@ -1,48 +1,68 @@
 package multipart
 
 import (
-	"encoding/json"
+	"bufio"
+	"errors"
+	"io"
 
 	"github.com/AlexxIT/go2rtc/pkg/core"
+	"github.com/pion/rtp"
 )
 
-func (c *Client) GetMedias() []*core.Media {
-	return c.medias
+type Producer struct {
+	core.SuperProducer
+	closer io.Closer
+	reader *bufio.Reader
 }
 
-func (c *Client) GetTrack(media *core.Media, codec *core.Codec) (*core.Receiver, error) {
-	for _, track := range c.receivers {
-		if track.Codec == codec {
-			return track, nil
+func Open(rd io.Reader) (*Producer, error) {
+	prod := &Producer{
+		closer: rd.(io.Closer),
+		reader: bufio.NewReader(rd),
+	}
+	prod.Medias = []*core.Media{
+		{
+			Kind:      core.KindVideo,
+			Direction: core.DirectionRecvonly,
+			Codecs: []*core.Codec{
+				{
+					Name:        core.CodecJPEG,
+					ClockRate:   90000,
+					PayloadType: core.PayloadTypeRAW,
+				},
+			},
+		},
+	}
+	prod.Type = "Multipart producer"
+	return prod, nil
+}
+
+func (c *Producer) Start() error {
+	if len(c.Receivers) != 1 {
+		return errors.New("mjpeg: no receivers")
+	}
+
+	mjpeg := c.Receivers[0]
+
+	for {
+		_, body, err := Next(c.reader)
+		if err != nil {
+			return err
+		}
+
+		c.Recv += len(body)
+
+		if mjpeg != nil {
+			packet := &rtp.Packet{
+				Header:  rtp.Header{Timestamp: core.Now90000()},
+				Payload: body,
+			}
+			mjpeg.WriteRTP(packet)
 		}
 	}
-	track := core.NewReceiver(media, codec)
-	c.receivers = append(c.receivers, track)
-	return track, nil
 }
 
-func (c *Client) Start() error {
-	return c.Handle()
-}
-
-func (c *Client) Stop() error {
-	for _, receiver := range c.receivers {
-		receiver.Close()
-	}
-	// important for close reader/writer gorutines
-	_ = c.res.Body.Close()
-	return nil
-}
-
-func (c *Client) MarshalJSON() ([]byte, error) {
-	info := &core.Info{
-		Type:       "HTTP/mixed active producer",
-		URL:        c.res.Request.URL.String(),
-		RemoteAddr: c.RemoteAddr,
-		UserAgent:  c.UserAgent,
-		Medias:     c.medias,
-		Receivers:  c.receivers,
-		Recv:       c.recv,
-	}
-	return json.Marshal(info)
+func (c *Producer) Stop() error {
+	_ = c.SuperProducer.Close()
+	return c.closer.Close()
 }
