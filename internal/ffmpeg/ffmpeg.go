@@ -1,7 +1,6 @@
 package ffmpeg
 
 import (
-	"errors"
 	"net/url"
 	"strings"
 
@@ -10,7 +9,6 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/ffmpeg/hardware"
 	"github.com/AlexxIT/go2rtc/internal/rtsp"
 	"github.com/AlexxIT/go2rtc/internal/streams"
-	"github.com/AlexxIT/go2rtc/pkg/core"
 	"github.com/AlexxIT/go2rtc/pkg/ffmpeg"
 )
 
@@ -27,12 +25,9 @@ func Init() {
 		defaults["global"] += " -v error"
 	}
 
-	streams.HandleFunc("ffmpeg", func(url string) (core.Producer, error) {
-		args := parseArgs(url[7:]) // remove `ffmpeg:`
-		if args == nil {
-			return nil, errors.New("can't generate ffmpeg command")
-		}
-		return streams.GetProducer("exec:" + args.String())
+	streams.RedirectFunc("ffmpeg", func(url string) (string, error) {
+		args := parseArgs(url[7:])
+		return "exec:" + args.String(), nil
 	})
 
 	device.Init(defaults["bin"])
@@ -57,7 +52,8 @@ var defaults = map[string]string{
 	// `-preset superfast` - we can't use ultrafast because it doesn't support `-profile main -level 4.1`
 	// `-tune zerolatency` - for minimal latency
 	// `-profile high -level 4.1` - most used streaming profile
-	"h264":  "-c:v libx264 -g 50 -profile:v high -level:v 4.1 -preset:v superfast -tune:v zerolatency -pix_fmt:v yuvj420p",
+	// `-pix_fmt:v yuv420p` - important for Telegram
+	"h264":  "-c:v libx264 -g 50 -profile:v high -level:v 4.1 -preset:v superfast -tune:v zerolatency -pix_fmt:v yuv420p",
 	"h265":  "-c:v libx265 -g 50 -profile:v main -level:v 5.1 -preset:v superfast -tune:v zerolatency",
 	"mjpeg": "-c:v mjpeg",
 	//"mjpeg": "-c:v mjpeg -force_duplicated_matrix:v 1 -huffman:v 0 -pix_fmt:v yuvj420p",
@@ -66,7 +62,7 @@ var defaults = map[string]string{
 	// https://github.com/pion/webrtc/issues/1514
 	// https://ffmpeg.org/ffmpeg-resampler.html
 	// `-async 1` or `-min_comp 0` - force frame_size=960, important for WebRTC audio quality
-	"opus":       "-c:a libopus -ar:a 48000 -ac:a 2 -application:a voip -min_comp 0",
+	"opus":       "-c:a libopus -application:a lowdelay -frame_duration 20 -min_comp 0",
 	"pcmu":       "-c:a pcm_mulaw -ar:a 8000 -ac:a 1",
 	"pcmu/16000": "-c:a pcm_mulaw -ar:a 16000 -ac:a 1",
 	"pcmu/48000": "-c:a pcm_mulaw -ar:a 48000 -ac:a 1",

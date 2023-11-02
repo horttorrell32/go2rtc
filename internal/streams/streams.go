@@ -5,31 +5,40 @@ import (
 	"net/url"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/AlexxIT/go2rtc/internal/api"
 	"github.com/AlexxIT/go2rtc/internal/app"
-	"github.com/AlexxIT/go2rtc/internal/app/store"
 	"github.com/rs/zerolog"
 )
 
 func Init() {
 	var cfg struct {
-		Mod map[string]any `yaml:"streams"`
+		Streams map[string]any `yaml:"streams"`
+		Publish map[string]any `yaml:"publish"`
 	}
 
 	app.LoadConfig(&cfg)
 
 	log = app.GetLogger("streams")
 
-	for name, item := range cfg.Mod {
-		streams[name] = NewStream(item)
-	}
-
-	for name, item := range store.GetDict("streams") {
+	for name, item := range cfg.Streams {
 		streams[name] = NewStream(item)
 	}
 
 	api.HandleFunc("api/streams", streamsHandler)
+
+	if cfg.Publish == nil {
+		return
+	}
+
+	time.AfterFunc(time.Second, func() {
+		for name, dst := range cfg.Publish {
+			if stream := Get(name); stream != nil {
+				Publish(stream, dst)
+			}
+		}
+	})
 }
 
 func Get(name string) *Stream {
@@ -118,6 +127,14 @@ func GetAll() (names []string) {
 	return
 }
 
+func Streams() map[string]*Stream {
+	return streams
+}
+
+func Delete(id string) {
+	delete(streams, id)
+}
+
 func streamsHandler(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	src := query.Get("src")
@@ -141,6 +158,11 @@ func streamsHandler(w http.ResponseWriter, r *http.Request) {
 
 		if New(name, src) == nil {
 			http.Error(w, "", http.StatusBadRequest)
+			return
+		}
+
+		if err := app.PatchConfig(name, src, "streams"); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 
 	case "PATCH":
@@ -164,6 +186,10 @@ func streamsHandler(w http.ResponseWriter, r *http.Request) {
 				} else {
 					api.ResponseJSON(w, stream)
 				}
+			} else if stream = Get(src); stream != nil {
+				if err := stream.Publish(dst); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
 			} else {
 				http.Error(w, "", http.StatusNotFound)
 			}
@@ -173,6 +199,10 @@ func streamsHandler(w http.ResponseWriter, r *http.Request) {
 
 	case "DELETE":
 		delete(streams, src)
+
+		if err := app.PatchConfig(src, nil, "streams"); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
 	}
 }
 
